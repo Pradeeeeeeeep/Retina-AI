@@ -47,6 +47,25 @@ classdef ScreeningApp < handle
         AnimationsEnabled = true
         % Active theme: 'light' (Glassmorphism, default) or 'dark' (Dark Pro)
         CurrentTheme = 'light'
+        % Login and role management properties
+        LoginGrid
+        LoginCard
+        LoginCardGrid
+        RoleButtonPHC
+        RoleButtonDoctor
+        RoleDescLabel
+        LoginUserField
+        LoginFacilityField
+        LoginButton
+        ActiveRole = 'phc'
+        ActiveUser = 'PHC Operator'
+        ActiveFacility = 'Govt PHC Dhanbad Center #1'
+        OperatorAvatar
+        OperatorNameLabel
+        OperatorRoleLabel
+        SwitchRoleButton
+        RoleBadge
+        RootGrid
     end
 
     properties (Access = private)
@@ -70,7 +89,6 @@ classdef ScreeningApp < handle
         % Stored UI references for theme switching and layout management
         RegisteredCards = {}
         RegisteredLabels = {}
-        RootGrid
         SidebarCard
         SidebarGrid
         WorkspaceGrid
@@ -99,6 +117,9 @@ classdef ScreeningApp < handle
         end
 
         function showCase(app, imagePath)
+            if ~isempty(app.LoginGrid) && isvalid(app.LoginGrid) && strcmp(app.LoginGrid.Visible, 'on')
+                app.handleLogin();
+            end
             app.ImagePathField.Value = char(imagePath);
             app.refreshCaseName();
             app.runScreening();
@@ -141,6 +162,93 @@ classdef ScreeningApp < handle
             app.ProcessingTimeValue.Text = 'Processing time  --';
             app.ScreeningResult = [];
             app.LastReport = [];
+        end
+
+        function selectRole(app, role)
+            t = app.Theme;
+            app.ActiveRole = lower(role);
+            if strcmpi(role, 'phc')
+                app.RoleButtonPHC.BackgroundColor = t.accent;
+                app.RoleButtonPHC.FontColor = [1 1 1];
+                app.RoleButtonDoctor.BackgroundColor = t.field;
+                app.RoleButtonDoctor.FontColor = t.text;
+                app.RoleDescLabel.Text = 'Primary Health Centre: Fundus capture, automated quality gating, and instant autonomous screening.';
+                if isempty(app.LoginUserField.Value) || startsWith(app.LoginUserField.Value, 'Dr.') || startsWith(app.LoginUserField.Value, 'DR-')
+                    app.LoginUserField.Value = 'PHC-DHANBAD-01';
+                end
+                if isempty(app.LoginFacilityField.Value) || contains(app.LoginFacilityField.Value, 'Hospital')
+                    app.LoginFacilityField.Value = 'Govt PHC Dhanbad Center #1';
+                end
+            else
+                doctorBlue = [0.12, 0.45, 0.90];
+                app.RoleButtonDoctor.BackgroundColor = doctorBlue;
+                app.RoleButtonDoctor.FontColor = [1 1 1];
+                app.RoleButtonPHC.BackgroundColor = t.field;
+                app.RoleButtonPHC.FontColor = t.text;
+                app.RoleDescLabel.Text = 'District Hospital: Specialist review, Grad-CAM attention audit, and clinical escalation sign-off.';
+                if isempty(app.LoginUserField.Value) || startsWith(app.LoginUserField.Value, 'PHC-')
+                    app.LoginUserField.Value = 'Dr. Sharma, M.S. (Ophth)';
+                end
+                if isempty(app.LoginFacilityField.Value) || contains(app.LoginFacilityField.Value, 'PHC')
+                    app.LoginFacilityField.Value = 'District Tele-Ophthalmology Hospital';
+                end
+            end
+        end
+
+        function handleLogin(app)
+            t = app.Theme;
+            user = strtrim(app.LoginUserField.Value);
+            if isempty(user)
+                if strcmpi(app.ActiveRole, 'phc')
+                    user = 'PHC Operator';
+                else
+                    user = 'Dr. Specialist';
+                end
+            end
+            facility = strtrim(app.LoginFacilityField.Value);
+            if isempty(facility)
+                if strcmpi(app.ActiveRole, 'phc')
+                    facility = 'Govt PHC Center #1';
+                else
+                    facility = 'District Hospital';
+                end
+            end
+
+            app.ActiveUser = user;
+            app.ActiveFacility = facility;
+
+            % Update Operator Profile Card in Sidebar
+            if strcmpi(app.ActiveRole, 'phc')
+                app.OperatorAvatar.Text = '🏥';
+                app.OperatorNameLabel.Text = user;
+                app.OperatorRoleLabel.Text = sprintf('PHC Operator  ·  %s', facility);
+                app.RoleBadge.Text = '  🏥 PHC OPERATOR MODE  ';
+                app.RoleBadge.BackgroundColor = t.greenTint;
+                app.RoleBadge.FontColor = t.accent;
+            else
+                doctorBlue = [0.12, 0.45, 0.90];
+                doctorBlueTint = [0.91, 0.94, 1.00];
+                app.OperatorAvatar.Text = '👨‍⚕️';
+                app.OperatorNameLabel.Text = user;
+                app.OperatorRoleLabel.Text = sprintf('Ophthalmologist  ·  %s', facility);
+                app.RoleBadge.Text = '  👨‍⚕️ DOCTOR / SPECIALIST MODE  ';
+                app.RoleBadge.BackgroundColor = doctorBlueTint;
+                app.RoleBadge.FontColor = doctorBlue;
+            end
+
+            % Transition to Main Dashboard
+            app.LoginGrid.Visible = 'off';
+            app.RootGrid.Visible = 'on';
+
+            app.setStatus(sprintf('Logged in as %s (%s). Ready to screen.', ...
+                user, upper(app.ActiveRole)), t.text, t.accent);
+        end
+
+        function showLoginScreen(app)
+            if ~isempty(app.LoginGrid) && isvalid(app.LoginGrid)
+                app.RootGrid.Visible = 'off';
+                app.LoginGrid.Visible = 'on';
+            end
         end
     end
 
@@ -211,6 +319,12 @@ classdef ScreeningApp < handle
 
             app.buildSidebar(root);
             app.buildWorkspace(root);
+            app.buildLoginScreen();
+
+            % Initial state: show login screen, hide main dashboard
+            app.RootGrid.Visible = 'off';
+            app.LoginGrid.Visible = 'on';
+
             app.applyTypography();
 
             app.UIFigure.KeyPressFcn = @(~, event) app.handleKey(event);
@@ -252,8 +366,14 @@ classdef ScreeningApp < handle
         end
 
         function handleKey(app, event)
-            if strcmp(event.Key, 'return') && strcmp(app.RunButton.Enable, 'on')
-                app.runScreening();
+            if strcmp(event.Key, 'return')
+                if ~isempty(app.LoginGrid) && isvalid(app.LoginGrid) && strcmp(app.LoginGrid.Visible, 'on')
+                    app.handleLogin();
+                    return;
+                end
+                if strcmp(app.RunButton.Enable, 'on')
+                    app.runScreening();
+                end
             end
         end
 
@@ -266,7 +386,7 @@ classdef ScreeningApp < handle
             app.SidebarCard = card;
 
             grid = uigridlayout(card, [10, 1]);
-            grid.RowHeight = {50, 36, 32, 140, 72, 115, 145, '1x', 56, 32};
+            grid.RowHeight = {50, 36, 32, 140, 72, 115, 145, '1x', 74, 32};
             grid.ColumnWidth = {'1x'};
             grid.Padding = [16, 16, 16, 16];
             grid.RowSpacing = 10;
@@ -367,23 +487,29 @@ classdef ScreeningApp < handle
             userGrid = uigridlayout(userCard, [1, 2]);
             userGrid.ColumnWidth = {34, '1x'};
             userGrid.RowHeight = {'1x'};
-            userGrid.Padding = [8, 8, 8, 8];
+            userGrid.Padding = [8, 6, 8, 6];
             userGrid.ColumnSpacing = 8;
             userGrid.BackgroundColor = t.field;
 
-            avatar = uilabel(userGrid, 'Text', '👤', 'FontSize', 18, ...
+            app.OperatorAvatar = uilabel(userGrid, 'Text', '🏥', 'FontSize', 20, ...
                 'HorizontalAlignment', 'center');
-            avatar.Layout.Column = 1;
-            uInfo = uigridlayout(userGrid, [2, 1]);
+            app.OperatorAvatar.Layout.Column = 1;
+            uInfo = uigridlayout(userGrid, [3, 1]);
             uInfo.Layout.Column = 2;
-            uInfo.RowHeight = {16, 14};
+            uInfo.RowHeight = {16, 14, 18};
             uInfo.Padding = [0, 0, 0, 0];
             uInfo.RowSpacing = 2;
             uInfo.BackgroundColor = t.field;
-            uilabel(uInfo, 'Text', 'Dr. Operator', 'FontSize', 11, ...
+            app.OperatorNameLabel = uilabel(uInfo, 'Text', 'PHC Operator', 'FontSize', 11, ...
                 'FontWeight', 'bold', 'FontColor', t.text);
-            uilabel(uInfo, 'Text', 'Clinician  ·  ID: #726302', ...
-                'FontSize', 9.5, 'FontColor', t.faint);
+            app.OperatorRoleLabel = uilabel(uInfo, 'Text', 'Govt PHC Dhanbad Center #1', ...
+                'FontSize', 9, 'FontColor', t.faint);
+            app.SwitchRoleButton = uibutton(uInfo, 'push', ...
+                'Text', '🔄 Switch User / Role', ...
+                'FontSize', 8.5, 'FontColor', t.muted, ...
+                'BackgroundColor', t.surface, ...
+                'Tooltip', 'Return to Login Screen to switch between PHC and Doctor roles', ...
+                'ButtonPushedFcn', @(~, ~) app.showLoginScreen());
 
             % --- Disclaimer
             footer = uilabel(grid, 'Text', ...
@@ -533,6 +659,141 @@ classdef ScreeningApp < handle
             end
         end
 
+        % ----------------------------------------------------------- login
+        function buildLoginScreen(app)
+            t = app.Theme;
+
+            % Login Grid (Centered in UIFigure)
+            loginGrid = uigridlayout(app.UIFigure, [3, 3]);
+            loginGrid.ColumnWidth = {'1x', 520, '1x'};
+            loginGrid.RowHeight = {'1x', 620, '1x'};
+            loginGrid.Padding = [20, 20, 20, 20];
+            loginGrid.BackgroundColor = t.bg;
+            app.LoginGrid = loginGrid;
+
+            % Glassmorphic Card Container
+            card = uipanel(loginGrid, 'BorderType', 'line', ...
+                'BorderColor', t.border, 'BackgroundColor', t.surface);
+            card.Layout.Row = 2;
+            card.Layout.Column = 2;
+            app.LoginCard = card;
+
+            cardGrid = uigridlayout(card, [12, 1]);
+            cardGrid.RowHeight = {44, 22, 18, 44, 34, 18, 36, 18, 36, 20, 44, 24};
+            cardGrid.ColumnWidth = {'1x'};
+            cardGrid.Padding = [32, 28, 32, 24];
+            cardGrid.RowSpacing = 8;
+            cardGrid.BackgroundColor = t.surface;
+            app.LoginCardGrid = cardGrid;
+
+            % Row 1: Logo & Title
+            logoBox = uigridlayout(cardGrid, [1, 2]);
+            logoBox.Layout.Row = 1;
+            logoBox.ColumnWidth = {36, '1x'};
+            logoBox.RowHeight = {'1x'};
+            logoBox.Padding = [0, 0, 0, 0];
+            logoBox.ColumnSpacing = 10;
+            logoBox.BackgroundColor = t.surface;
+
+            logoIcon = uilabel(logoBox, 'Text', '✦', 'FontSize', 26, ...
+                'FontColor', t.accent, 'HorizontalAlignment', 'center');
+            logoIcon.Layout.Column = 1;
+
+            logoTitle = uilabel(logoBox, 'Text', 'Retina-AI Tele-Screening', ...
+                'FontSize', 21, 'FontWeight', 'bold', 'FontColor', t.text);
+            logoTitle.Layout.Column = 2;
+
+            % Row 2: Subtitle
+            subTitle = uilabel(cardGrid, 'Text', ...
+                'Rural Diabetic Retinopathy Diagnostic Portal  ·  SIH26038', ...
+                'FontSize', 11, 'FontColor', t.muted);
+            subTitle.Layout.Row = 2;
+
+            % Row 3: Role Section Header
+            roleHdr = uilabel(cardGrid, 'Text', 'CHOOSE ACCESS ROLE', ...
+                'FontSize', 10, 'FontWeight', 'bold', 'FontColor', t.faint);
+            roleHdr.Layout.Row = 3;
+
+            % Row 4: Two Large Role Selector Buttons (PHC vs Doctor)
+            roleGrid = uigridlayout(cardGrid, [1, 2]);
+            roleGrid.Layout.Row = 4;
+            roleGrid.ColumnWidth = {'1x', '1x'};
+            roleGrid.RowHeight = {42};
+            roleGrid.Padding = [0, 0, 0, 0];
+            roleGrid.ColumnSpacing = 12;
+            roleGrid.BackgroundColor = t.surface;
+
+            app.RoleButtonPHC = uibutton(roleGrid, 'push', ...
+                'Text', '🏥  PHC Operator', ...
+                'FontSize', 12, 'FontWeight', 'bold', ...
+                'BackgroundColor', t.accent, 'FontColor', [1 1 1], ...
+                'ButtonPushedFcn', @(~, ~) app.selectRole('phc'));
+            app.RoleButtonPHC.Layout.Column = 1;
+
+            app.RoleButtonDoctor = uibutton(roleGrid, 'push', ...
+                'Text', '👨‍⚕️  Doctor / Specialist', ...
+                'FontSize', 12, 'FontWeight', 'bold', ...
+                'BackgroundColor', t.field, 'FontColor', t.text, ...
+                'ButtonPushedFcn', @(~, ~) app.selectRole('doctor'));
+            app.RoleButtonDoctor.Layout.Column = 2;
+
+            % Row 5: Role Description Box
+            app.RoleDescLabel = uilabel(cardGrid, ...
+                'Text', 'Primary Health Centre: Fundus capture, automated quality gating, and instant autonomous screening.', ...
+                'FontSize', 10.5, 'FontColor', t.muted, ...
+                'WordWrap', 'on');
+            app.RoleDescLabel.Layout.Row = 5;
+
+            % Row 6: User ID Label
+            userLabel = uilabel(cardGrid, 'Text', 'Operator / Clinician Identifier', ...
+                'FontSize', 10, 'FontWeight', 'bold', 'FontColor', t.text);
+            userLabel.Layout.Row = 6;
+
+            % Row 7: User ID Edit Field
+            app.LoginUserField = uieditfield(cardGrid, 'text', ...
+                'Value', 'PHC-DHANBAD-01', ...
+                'Placeholder', 'Enter your name, staff ID, or badge number...', ...
+                'FontSize', 11.5, 'FontColor', t.text, ...
+                'BackgroundColor', t.field);
+            app.LoginUserField.Layout.Row = 7;
+
+            % Row 8: Facility / Center Label
+            facLabel = uilabel(cardGrid, 'Text', 'Center / Hospital Facility Name', ...
+                'FontSize', 10, 'FontWeight', 'bold', 'FontColor', t.text);
+            facLabel.Layout.Row = 8;
+
+            % Row 9: Facility Edit Field
+            app.LoginFacilityField = uieditfield(cardGrid, 'text', ...
+                'Value', 'Govt PHC Dhanbad Center #1', ...
+                'Placeholder', 'e.g. District Tele-Ophthalmology Center...', ...
+                'FontSize', 11.5, 'FontColor', t.text, ...
+                'BackgroundColor', t.field);
+            app.LoginFacilityField.Layout.Row = 9;
+
+            % Row 10: Quick Hint
+            hintLabel = uilabel(cardGrid, ...
+                'Text', 'Tip: Any custom value can be entered. Click below to proceed.', ...
+                'FontSize', 9.5, 'FontColor', t.faint);
+            hintLabel.Layout.Row = 10;
+
+            % Row 11: Submit Button
+            app.LoginButton = uibutton(cardGrid, 'push', ...
+                'Text', 'Sign In to Screening Portal  ➔', ...
+                'FontSize', 13, 'FontWeight', 'bold', ...
+                'BackgroundColor', t.accent, 'FontColor', [1 1 1], ...
+                'ButtonPushedFcn', @(~, ~) app.handleLogin());
+            app.LoginButton.Layout.Row = 11;
+
+            % Row 12: Footer Note
+            footerLabel = uilabel(cardGrid, ...
+                'Text', '🔒 SimEvents Telemedicine Network · Role-Based Workflow', ...
+                'FontSize', 9.5, 'FontColor', t.faint, ...
+                'HorizontalAlignment', 'center');
+            footerLabel.Layout.Row = 12;
+
+            app.registerCard(card, cardGrid);
+        end
+
         % -------------------------------------------------------- workspace
         function buildWorkspace(app, parent)
             t = app.Theme;
@@ -577,9 +838,9 @@ classdef ScreeningApp < handle
 
         function buildTopBar(app, parent)
             t = app.Theme;
-            top = uigridlayout(parent, [1, 6]);
+            top = uigridlayout(parent, [1, 7]);
             top.Layout.Row = 1;
-            top.ColumnWidth = {'1x', 'fit', 'fit', 'fit', 'fit', 'fit'};
+            top.ColumnWidth = {'1x', 'fit', 'fit', 'fit', 'fit', 'fit', 'fit'};
             top.RowHeight = {'1x'};
             top.Padding = [0, 0, 0, 0];
             top.ColumnSpacing = 10;
@@ -594,6 +855,14 @@ classdef ScreeningApp < handle
             app.ImagePathField.Layout.Column = 1;
             app.ImagePathField.ValueChangedFcn = @(~, ~) app.refreshCaseName();
 
+            % Role Mode Badge
+            app.RoleBadge = uilabel(top, 'Text', ...
+                '  🏥 PHC OPERATOR MODE  ', ...
+                'FontSize', 10.5, 'FontWeight', 'bold', ...
+                'FontColor', t.accent, 'BackgroundColor', t.greenTint, ...
+                'HorizontalAlignment', 'center');
+            app.RoleBadge.Layout.Column = 2;
+
             % Badges
             [threshold, frozenOn] = app.frozenBadgeFacts();
             app.OperatingBadge = uilabel(top, 'Text', ...
@@ -601,14 +870,14 @@ classdef ScreeningApp < handle
                 'FontSize', 10.5, 'FontWeight', 'bold', ...
                 'FontColor', t.muted, 'BackgroundColor', t.surface, ...
                 'HorizontalAlignment', 'center');
-            app.OperatingBadge.Layout.Column = 2;
+            app.OperatingBadge.Layout.Column = 3;
 
             app.SealedBadge = uilabel(top, 'Text', ...
                 '  🔒 Sealed: Untouched  ', ...
                 'FontSize', 10.5, 'FontWeight', 'bold', ...
                 'FontColor', t.green, 'BackgroundColor', t.greenTint, ...
                 'HorizontalAlignment', 'center');
-            app.SealedBadge.Layout.Column = 3;
+            app.SealedBadge.Layout.Column = 4;
 
             app.ThemeToggleButton = uibutton(top, 'push', ...
                 'Text', '🌙 Dark Mode', ...
@@ -616,7 +885,7 @@ classdef ScreeningApp < handle
                 'BackgroundColor', t.surface, ...
                 'Tooltip', 'Switch between Light Glass and Dark Pro themes', ...
                 'ButtonPushedFcn', @(~, ~) app.toggleTheme());
-            app.ThemeToggleButton.Layout.Column = 4;
+            app.ThemeToggleButton.Layout.Column = 5;
 
             % Secondary Action: Reset Button
             app.ResetButton = uibutton(top, 'push', ...
@@ -625,7 +894,7 @@ classdef ScreeningApp < handle
                 'BackgroundColor', t.surface, ...
                 'Tooltip', 'Reset canvas for next screening', ...
                 'ButtonPushedFcn', @(~, ~) app.resetApp());
-            app.ResetButton.Layout.Column = 5;
+            app.ResetButton.Layout.Column = 6;
 
             % Primary Action: Run Screening Button (DocuVerse emerald button)
             app.RunButton = uibutton(top, 'push', ...
@@ -634,7 +903,7 @@ classdef ScreeningApp < handle
                 'FontColor', t.accentInk, 'BackgroundColor', t.accent, ...
                 'Tooltip', 'Run full triage pipeline (Enter)', ...
                 'ButtonPushedFcn', @(~, ~) app.runScreening());
-            app.RunButton.Layout.Column = 6;
+            app.RunButton.Layout.Column = 7;
         end
 
         function buildHeaderTitle(app, parent)
@@ -988,6 +1257,60 @@ classdef ScreeningApp < handle
                 else
                     app.ThemeToggleButton.Text = '☀ Light Glass';
                 end
+            end
+
+            if ~isempty(app.RoleBadge) && isvalid(app.RoleBadge)
+                if strcmpi(app.ActiveRole, 'phc')
+                    app.RoleBadge.BackgroundColor = t.greenTint;
+                    app.RoleBadge.FontColor = t.accent;
+                else
+                    doctorBlue = [0.12, 0.45, 0.90];
+                    app.RoleBadge.BackgroundColor = [0.91, 0.94, 1.00];
+                    app.RoleBadge.FontColor = doctorBlue;
+                end
+            end
+
+            if ~isempty(app.LoginGrid) && isvalid(app.LoginGrid)
+                app.LoginGrid.BackgroundColor = t.bg;
+            end
+            if ~isempty(app.LoginCard) && isvalid(app.LoginCard)
+                app.LoginCard.BackgroundColor = t.surface;
+                app.LoginCard.BorderColor = t.border;
+            end
+            if ~isempty(app.LoginCardGrid) && isvalid(app.LoginCardGrid)
+                app.LoginCardGrid.BackgroundColor = t.surface;
+            end
+            if ~isempty(app.LoginUserField) && isvalid(app.LoginUserField)
+                app.LoginUserField.BackgroundColor = t.field;
+                app.LoginUserField.FontColor = t.text;
+            end
+            if ~isempty(app.LoginFacilityField) && isvalid(app.LoginFacilityField)
+                app.LoginFacilityField.BackgroundColor = t.field;
+                app.LoginFacilityField.FontColor = t.text;
+            end
+            if ~isempty(app.RoleButtonPHC) && isvalid(app.RoleButtonPHC)
+                if strcmpi(app.ActiveRole, 'phc')
+                    app.RoleButtonPHC.BackgroundColor = t.accent;
+                    app.RoleButtonPHC.FontColor = [1 1 1];
+                    app.RoleButtonDoctor.BackgroundColor = t.field;
+                    app.RoleButtonDoctor.FontColor = t.text;
+                else
+                    doctorBlue = [0.12, 0.45, 0.90];
+                    app.RoleButtonDoctor.BackgroundColor = doctorBlue;
+                    app.RoleButtonDoctor.FontColor = [1 1 1];
+                    app.RoleButtonPHC.BackgroundColor = t.field;
+                    app.RoleButtonPHC.FontColor = t.text;
+                end
+            end
+            if ~isempty(app.OperatorNameLabel) && isvalid(app.OperatorNameLabel)
+                app.OperatorNameLabel.FontColor = t.text;
+            end
+            if ~isempty(app.OperatorRoleLabel) && isvalid(app.OperatorRoleLabel)
+                app.OperatorRoleLabel.FontColor = t.faint;
+            end
+            if ~isempty(app.SwitchRoleButton) && isvalid(app.SwitchRoleButton)
+                app.SwitchRoleButton.BackgroundColor = t.surface;
+                app.SwitchRoleButton.FontColor = t.muted;
             end
 
             if ~isempty(app.ImagePathField) && isvalid(app.ImagePathField)
