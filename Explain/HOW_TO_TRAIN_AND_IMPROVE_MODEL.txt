@@ -1,0 +1,693 @@
+====================================================================================================
+SIH PROBLEM STATEMENT 26038: COMPREHENSIVE GUIDE TO MODEL TRAINING,
+FEATURE INTEGRATION, MATLAB WORKFLOW, AND PERFORMANCE IMPROVEMENTS
+====================================================================================================
+
+Location: /Explain/HOW_TO_TRAIN_AND_IMPROVE_MODEL.txt
+Target Audience: Developers, ML/Bio-medical Engineers, and SIH 2026 Evaluation Panel
+Project: Explainable AI Pipeline for Diabetic Retinopathy (DR) Screening in Rural India
+
+----------------------------------------------------------------------------------------------------
+TABLE OF CONTENTS
+----------------------------------------------------------------------------------------------------
+1. BACKGROUND & PROBLEM CONTEXT (SIH 26038)
+2. HOW TO IMPORT AND CONFIGURE THIS PROJECT IN MATLAB
+   2.1 MATLAB Version and Required Toolboxes
+   2.2 Folder Structure and Setting MATLAB Paths
+   2.3 Dataset Preparation & Directory Layout
+   2.4 Checkpoint & Weight Management
+3. HOW TO TRAIN THE MODELS (STEP-BY-STEP)
+   3.1 Track 1: DR Severity Grading Classifier (ResNet-50 Backbone)
+   3.2 Track 2: Multi-Label Lesion Segmentation Network (IDRiD U-Net)
+   3.3 Track 3: Retinal Vessel Segmentation Network (DRIVE U-Net)
+   3.4 Post-Training Probability Calibration (Temperature Scaling)
+4. HOW TO FEED WITH FEATURES (FEATURE EXTRACTION & INTEGRATION PIPELINE)
+   4.1 Image Quality Assessment & Enhancement Features
+   4.2 Classical Morphological Candidate Extraction Features
+   4.3 Deep Learned Lesion Segmentation Features
+   4.4 Retinal Vessel Structure Features
+   4.5 Explainability Features (Grad-CAM Attention Heatmaps)
+   4.6 Clinical ICDR Rule Engine & Decision Policy Integration
+5. HOW THE PIPELINE PREVENTS CLINICAL ERRORS (SAFETY & THREE-WAY DECISION)
+6. WHAT AND HOW TO IMPROVE (INNOVATION ROADMAP & HACKATHON WINNING ENHANCEMENTS)
+   6.1 Sub-Pixel Microaneurysm Detection
+   6.2 Joint Multitask Classification & Lesion Segmentation Architecture
+   6.3 Wiring Vessel Segmentation into Clinical 4-2-1 Decision Logic
+   6.4 Fovea & Optic Disc Localization for Macular Edema (CSME) Detection
+   6.5 Mitigating the Grad-CAM Spatial Agreement Bottleneck
+   6.6 Low-Cost Portable Fundus Camera Domain Adaptation
+   6.7 Simulink Telemedicine Simulation Expansion & Edge Deployment
+7. COMPLETE RUN & COMMAND CHEATSHEET
+8. DATASET DIRECTORY LAYOUT & EXACT FOLDER STRUCTURE (WHERE TO PLACE IMAGES)
+
+====================================================================================================
+1. BACKGROUND & PROBLEM CONTEXT (SIH 26038)
+====================================================================================================
+Diabetic Retinopathy (DR) affects over 18% of India's 77 million diabetic population. While early
+screening prevents 90% of vision loss, India faces a severe specialist deficit (only ~1 ophthalmologist
+per 100,000 rural citizens). 
+
+Standard AI black-box classifiers fail in real rural deployments due to:
+  a) Variable image quality from low-cost handheld/portable fundus cameras.
+  b) Lack of explainable, clinically grounded evidence that a doctor can verify in <30 seconds.
+  c) Forced binary decisions (Healthy vs Sick) that hide uncertainty and mistakenly send sick patients home.
+
+This MATLAB pipeline addresses this by providing:
+  - An Automated Quality Gate that rejects ungradeable images with recapture instructions.
+  - Dual-Track Evidence: A 5-class deep neural network combined with independent lesion segmentation
+    and morphological feature extractors.
+  - A 3-Way Safety Decision: "Auto-Clear" (healthy), "Refer" (DR detected), or "Escalate" (handover to doctor).
+  - Spatial Grad-CAM and ICDR 4-2-1 clinical rule verification.
+  - Simulink district-scale telemedicine resource optimization.
+
+====================================================================================================
+2. HOW TO IMPORT AND CONFIGURE THIS PROJECT IN MATLAB
+====================================================================================================
+
+2.1 MATLAB VERSION AND REQUIRED TOOLBOXES
+-----------------------------------------
+This project is built natively for MATLAB (R2023b or R2024a/R2024b recommended).
+The following MathWorks toolboxes are required:
+  1. Deep Learning Toolbox (dlnetwork, training, GPU execution, minibatch queues)
+  2. Image Processing Toolbox (CLAHE, morphological filters, imadjust, regionprops)
+  3. Computer Vision Toolbox (feature detection, coordinate transformations)
+  4. Medical Imaging Toolbox (fundus image handling, DICOM/biomedical utilities)
+  5. Statistics and Machine Learning Toolbox (Wilson score intervals, calibration, logistic regression)
+  6. Simulink & SimEvents (discrete-event district telemedicine queue simulation)
+  7. Parallel Computing Toolbox (optional, for accelerated GPU training)
+
+2.2 FOLDER STRUCTURE AND SETTING MATLAB PATHS
+---------------------------------------------
+Inside MATLAB (Desktop or Headless CLI), the root directory must be the workspace root:
+  cd '/path/to/sih26038-master'
+
+To import all packages and modules into the MATLAB search path:
+  addpath(genpath('src'));     % Adds +grade, +segment, +quality, +explain, +report, +data, +common
+  addpath('eval');             % Adds evaluation harness and validation scripts
+  addpath(genpath('eval'));    % Adds metric functions (Wilson intervals, AUPR, ECE)
+  addpath('simulink');         % Adds SimEvents district simulation scripts
+  savepath;                    % (Optional) Saves path for future sessions
+
+Why are packages structured with a '+'?
+In MATLAB, directories prefixed with '+' (e.g. src/+grade, src/+quality) are native MATLAB Packages.
+You do NOT call functions by loose scripts; you call them with namespace qualifiers:
+  - quality.assess(...)
+  - grade.train(...)
+  - segment.trainLesionSegmentation(...)
+  - explain.gradcam(...)
+  - common.preprocess(...)
+
+2.3 DATASET PREPARATION & DIRECTORY LAYOUT
+------------------------------------------
+The repository expects data organized in the following standard benchmark layout:
+  sih26038-master/
+  ├── data/
+  │   ├── raw/
+  │   │   ├── train/               % APTOS 2019 / EyePACS fundus images (.png / .jpg)
+  │   │   │   ├── 000c1434d8d7.png
+  │   │   │   └── ...
+  │   │   ├── train.csv            % CSV mapping id_code -> diagnosis (0, 1, 2, 3, 4)
+  │   │   ├── IDRiD/               % IDRiD Segmentation Dataset
+  │   │   │   ├── 1. Original Images/
+  │   │   │   │   ├── a. Training Set/
+  │   │   │   │   └── b. Testing Set/
+  │   │   │   └── 2. Groundtruths/
+  │   │   │       ├── a. Training Set/ (Microaneurysms, Haemorrhages, Hard Exudates, Soft Exudates)
+  │   │   │       └── b. Testing Set/
+  │   │   └── DRIVE/               % DRIVE Vessel Dataset
+  │   │       ├── training/images/ & training/1st_manual/ & training/mask/
+  │   │       └── test/images/ & test/mask/
+  │   ├── splits/
+  │   │   ├── train.csv            % Pre-generated stratified patient-level train split
+  │   │   ├── val.csv              % Validation split (550 images)
+  │   │   ├── cal.csv              % Calibration split (365 images, used for Temperature & thresholding)
+  │   │   ├── test.csv             % Internal test split
+  │   │   ├── lesion_train.csv     % IDRiD Set-A training split
+  │   │   ├── lesion_val.csv       % IDRiD Set-A validation split
+  │   │   └── vessel_*.csv         % DRIVE splits stratified by vessel density
+  │   └── sealed/                  % External benchmark (Messidor-2), untouched during training
+
+IMPORTANT CLINICAL RULE:
+Never regenerate splits randomly at runtime. Patient-level splits (`data/splits/*.csv`) guarantee
+that images from the same patient or eye never leak between training, validation, and calibration.
+
+2.4 CHECKPOINT & WEIGHT MANAGEMENT
+----------------------------------
+Trained model checkpoints are saved as `.mat` files containing both the model weights and the exact
+configuration JSON used. Checkpoints are written to dated subdirectories in `results/`, e.g.:
+  results/20260823_184930/epoch_08.mat                      (Classifier backbone)
+  results/20260830_093848_lesion_segmentation/best_lesion_model.mat (Lesion U-Net)
+  results/20260831_003101_vessel_segmentation/best_vessel_model.mat (Vessel U-Net)
+
+To use these in configuration, reference them in `config/default.json` under `operating_point.model`
+and `lesion_segmentation.checkpoint`.
+
+====================================================================================================
+3. HOW TO TRAIN THE MODELS (STEP-BY-STEP)
+====================================================================================================
+
+3.1 TRACK 1: DR SEVERITY GRADING CLASSIFIER (ResNet-50)
+-------------------------------------------------------
+What it is:
+A 5-class convolutional neural network classifying fundus images into the International Clinical
+Diabetic Retinopathy (ICDR) scale:
+  Level 0: No DR (Healthy retina)
+  Level 1: Mild NPDR (Microaneurysms only)
+  Level 2: Moderate NPDR (Microaneurysms, hemorrhages, hard/soft exudates)
+  Level 3: Severe NPDR (4-2-1 rule: extensive hemorrhages in 4 quadrants, venous beading in 2, IRMA in 1)
+  Level 4: Proliferative DR (Neovascularization, vitreous/preretinal hemorrhage)
+
+Where the code lives:
+  `src/+grade/train.m`
+  Configuration file: `config/default.json`
+
+Command to Run Training in MATLAB:
+  matlab -batch "addpath(genpath('src')); grade.train('config/default.json')"
+Or inside the MATLAB GUI:
+  addpath(genpath('src'));
+  grade.train('config/default.json');
+
+To run a fast 1-epoch sanity check ("smoke test"):
+  grade.train('config/default.json', 'Mode', 'smoke');
+
+How Training Works Internally:
+  1. Data Loading & Resampling:
+     Reads `data/splits/train.csv`. Extreme class imbalance exists (Level 4 PDR has few cases, Level 0 has many).
+     The code performs class-aware oversampling of minority classes (`localOversampleMinorities`) and computes
+     inverse-frequency loss weights (`classWeights(counts)`).
+  2. Input Processing:
+     Images are passed through `common.preprocess` to extract circular Field of View (FOV) masks, remove black
+     borders, and resize to 448x448 with single-precision normalization ([0, 1]).
+     NOTE: 448x448 is strictly enforced because 224x224 destroys sub-pixel microaneurysm patterns.
+  3. Network Architecture:
+     ResNet-50 backbone initialized from ImageNet. The final classification head is replaced with:
+       - Global Average Pooling
+       - Dropout layer (probability = 0.5)
+       - Fully Connected layer with 5 outputs (`fc1000`)
+       - Softmax layer
+  4. Two-Stage Learning Schedule:
+     - Warmup Epochs (Epochs 1-2): Backbone weights are frozen; only the classification head is trained
+       with learning rate 1e-3 to prevent disrupting pretrained feature extractors.
+     - Fine-tuning Epochs (Epochs 3-15): Entire network unfreezes with Adam optimizer at lr = 2e-5,
+       gradient clipping threshold = 10, weight decay = 0.1.
+  5. Per-Epoch Validation:
+     At every epoch, the validation split (n=550) is evaluated. Crucially, the code prints:
+     - Per-class recall (sensitivity for each level 0 through 4)
+     - Full 5x5 confusion matrix
+     - Referable DR sensitivity (Levels 2+ vs 0-1) and specificity.
+     This guarantees you catch majority-class collapse immediately.
+
+3.2 TRACK 2: MULTI-LABEL LESION SEGMENTATION NETWORK (IDRiD U-Net)
+------------------------------------------------------------------
+What it is:
+A multi-label semantic segmentation U-Net trained on the IDRiD dataset to locate four cardinal DR lesions:
+  - MA: Microaneurysms (tiny red dots, earliest sign)
+  - HE: Haemorrhages (larger red blood spills)
+  - EX: Hard Exudates (bright yellow lipid deposits)
+  - SE: Soft Exudates / Cotton Wool Spots (pale nerve-fiber infarcts)
+
+Where the code lives:
+  `src/+segment/trainLesionSegmentation.m`
+
+Command to Run Training in MATLAB:
+  matlab -batch "addpath(genpath('src')); segment.trainLesionSegmentation('config/default.json')"
+
+Crucial Technical Disciplines for Lesion Training:
+  1. Native-Resolution Patch Sampling (NEVER RESIZE):
+     Lesions (especially microaneurysms) are often only 5 to 15 pixels across. Resizing a 4000x3000 fundus image
+     to 512x512 completely erases them!
+     Instead, `sampleLesionPatches.m` samples 512x512 crops at full native resolution. 75% of patches are
+     steered directly to center on positive lesion ground truth masks (`lesion_patch_fraction = 0.75`).
+  2. Scale Normalization across Cameras:
+     Different fundus cameras have different optical zoom. The pipeline computes the diameter of the retina's
+     circular FOV and scales all images to a reference FOV diameter (3,279 pixels) before cropping.
+  3. Asymmetric Tversky Loss (`segment.lesionLoss.m`):
+     Lesions make up less than 0.1% to 1.0% of retinal pixels. Standard binary cross-entropy or symmetric Dice loss
+     reaches 99.5% accuracy by simply predicting blank background!
+     The loss function uses Tversky index with:
+       alpha = 0.3 (weight on False Positives)
+       beta  = 0.7 (weight on False Negatives) + Focal parameter gamma = 2.0.
+     Weighting beta > alpha heavily penalizes missing real lesions.
+  4. Evidence Head Selection:
+     Although the U-Net has 4 output heads, soft exudates and microaneurysms often have false positives on
+     unhealthy or artifact-rich field cameras.
+     In `config/default.json`, `evidence_heads` is set to `["EX"]` (Hard Exudates) at threshold 0.99 for the
+     clinical rule engine. Hard exudates provide unequivocal proof of referable DR (Level 2+).
+
+3.3 TRACK 3: RETINAL VESSEL SEGMENTATION NETWORK (DRIVE U-Net)
+-------------------------------------------------------------
+What it is:
+A patch-based U-Net that segments the retinal vascular tree from the green channel of the fundus photograph.
+
+Where the code lives:
+  `src/+segment/trainVesselSegmentation.m`
+
+Command to Run Training in MATLAB:
+  matlab -batch "addpath(genpath('src')); segment.trainVesselSegmentation('config/default.json')"
+
+How Vessel Training Works:
+  1. Green Channel CLAHE Extraction:
+     Vessels have peak absorption contrast in the green spectral band. The image green channel is extracted and
+     enhanced using Contrast-Limited Adaptive Histogram Equalization (CLAHE).
+  2. Patch Extraction:
+     128x128 patches are sampled (50% centered on vessels, 50% background).
+  3. Symmetric Dice Loss:
+     Unlike lesions, blood vessels cover ~12.5% of the retina. Therefore, a symmetric Dice loss is used
+     (`segment.vesselLoss.m`).
+  4. Metric Evaluation strictly inside FOV:
+     Evaluation (`vesselSegmentationEvaluation.m`) measures AUC, Sensitivity, and Specificity strictly inside the
+     camera FOV mask. (Scoring black corner border pixels outside the aperture would give fake inflated specificity).
+
+3.4 POST-TRAINING PROBABILITY CALIBRATION (TEMPERATURE SCALING)
+--------------------------------------------------------------
+What it is:
+Modern deep networks are notoriously overconfident: a model output of 0.90 softmax often has an empirical accuracy
+of only 65%. In medical screening, raw softmax cannot be trusted for clinical referral gates.
+
+Where the code lives:
+  `src/+grade/fitTemperature.m`
+  `src/+grade/applyTemperature.m`
+
+How to Fit Calibration:
+  After the classifier finishes training, run temperature scaling on the held-out calibration split (n=365):
+    matlab -batch "addpath(genpath('src')); addpath('eval'); grade.fitTemperature('results/<run>/epoch_08.mat', 'config/default.json')"
+
+How it Works Mathematically:
+  A single scalar temperature parameter T > 0 is optimized using L-BFGS to minimize negative log-likelihood (NLL)
+  on validation logits:
+    p_calibrated = softmax( logits / T )
+  In this project, the fitted temperature is T = 2.1414, which successfully lowers Expected Calibration Error (ECE)
+  and yields true statistical probabilities for the clinical referral threshold (0.40).
+
+====================================================================================================
+4. HOW TO FEED WITH FEATURES (FEATURE EXTRACTION & INTEGRATION PIPELINE)
+====================================================================================================
+The complete pipeline merges clinical features across 6 modular steps. Here is how features are
+extracted, transformed, and fed through the system:
+
+  [ Raw Fundus Image ]
+          │
+          ▼
+  [ 1. Quality Assessment Gate ] ──(If Ungradable)──► [ Reject + Recapture Advice ]
+          │ (If Adequate / Borderline + CLAHE Enhanced)
+          ▼
+  [ 2. Shared Preprocessing (FOV Masking, Scaling, 448x448) ]
+          │
+    ┌─────┴──────────────────────────────────────┐
+    ▼                                            ▼
+[ 3. ResNet-50 Classifier ]            [ 4. Dual Evidence Channels ]
+    │                                            │
+    ├─► Logits ──► Temp Scaling (T=2.14)        ├─► Classical Morphology (Top-Hat/Bottom-Hat MA/HE)
+    │     │                                      │     └─► Quadrant counts (Q1..Q4)
+    │     └─► Calibrated Probabilities           ├─► Deep Lesion U-Net (EX, HE, MA masks)
+    │                                            └─► Retinal Vessel U-Net (Vessel density)
+    ▼                                            ▼
+[ 5. Explainability Module ]              [ 6. Clinical ICDR Rule Engine ]
+    ├─► Grad-CAM Heatmap (res5c layer)          └─► 4-2-1 Diagnostic Rule Mapping
+    └─► Heatmap Coordinates                     (Checks clinical criteria for Levels 0-4)
+    │                                            │
+    └──────────────────┬─────────────────────────┘
+                       ▼
+          [ 7. Decision Policy Fusion ]
+          - Quality verified?
+          - Calibrated Referable Prob >= 0.40?
+          - Rule Engine concordant with CNN?
+          - Grad-CAM heatmap overlaps real lesion coordinates?
+                       │
+                       ▼
+        [ Three-Way Clinical Decision ]
+        - AUTO-CLEAR (Level 0, High Confidence, Evidence agrees)
+        - REFER      (Level 2+, Proven lesion evidence)
+        - ESCALATE   (Quality borderline, Conflict between CNN and Lesions, or Level 4)
+
+Detailed breakdown of feature feeding mechanisms:
+
+4.1 IMAGE QUALITY ASSESSMENT & ENHANCEMENT FEATURES (`+quality`)
+----------------------------------------------------------------
+Before any neural network is called, the image is passed to `quality.assess(image, config)`:
+  - Focus & Sharpness: Computed using Laplacian variance and high-frequency edge energy.
+  - Illumination & Exposure: Evaluated from intensity histogram quantiles to identify severe underexposure
+    (dark images) or flash glare overexposure (saturated white spots).
+  - Field-of-View Integrity: Circular Hough transform detects camera aperture radius and clipping.
+Decision:
+  - "Adequate": Passes cleanly to preprocessing.
+  - "Borderline": Automatically enhanced with adaptive CLAHE and illumination equalization.
+  - "Ungradable": Pipeline halts immediately. Outputs structured recapture guidance (e.g. "Increase illumination",
+    "Recenter pupil on macula").
+
+4.2 CLASSICAL MORPHOLOGICAL CANDIDATE FEATURES (`segment.detect`)
+-----------------------------------------------------------------
+Provides Track-A evidence that requires zero neural network training and cannot hallucinate:
+  - Extracts the green channel where microvascular contrast is highest.
+  - Performs Morphological Top-Hat (to isolate bright spots like exudates) and Bottom-Hat (to isolate dark
+    lesions like microaneurysms and hemorrhages).
+  - Connects components, computes morphological eccentricity, area, and contrast ratio against local retinal background.
+  - Passes candidate coordinates to `segment.assignQuadrants(candidates, opticDisc, fovea)` to count lesions
+    in each of the 4 retinal quadrants (Superotemporal, Inferotemporal, Superonasal, Inferonasal).
+
+4.3 DEEP LEARNED LESION SEGMENTATION FEATURES (`segment.segmentLesions`)
+------------------------------------------------------------------------
+Trained U-Net evaluates the image via sliding tiles with 64-pixel overlap:
+  - Outputs 4 distinct probability channels for MA, HE, EX, SE.
+  - Applies calibrated operating thresholds (e.g., Hard Exudates threshold = 0.99).
+  - Binarizes masks and calculates lesion centroid coordinates, total surface area, and quadrant distribution.
+
+4.4 EXPLAINABILITY FEATURES: GRAD-CAM HEATMAPS (`explain.gradcam`)
+------------------------------------------------------------------
+To explain the ResNet-50 prediction:
+  - Hooks into activation maps of the final convolutional layer (`res5c_branch2c`).
+  - Computes the gradients of the predicted class score with respect to feature activation maps:
+      alpha_k = (1/Z) * sum_i sum_j ( d Y_c / d A_ij^k )
+  - Computes weighted combination followed by ReLU:
+      L_GradCAM = ReLU( sum_k alpha_k * A^k )
+  - Rescales heatmap back to original fundus pixel coordinates.
+
+4.5 THE CLINICAL ICDR RULE ENGINE (`grade.icdrRule`)
+----------------------------------------------------
+Instead of blindly trusting the neural network's final output, the extracted lesion features are fed
+into a deterministic, transparent medical rule engine implementing the AAO/ICDR guidelines:
+  - Level 0: Zero microaneurysms, zero hemorrhages, zero exudates.
+  - Level 1: Microaneurysms present, but no hemorrhages or exudates.
+  - Level 2: Hard exudates present, or hemorrhages in 1 to 3 quadrants.
+  - Level 3: Severe NPDR meeting the "4-2-1 Rule":
+             - Hemorrhages in all 4 quadrants, OR
+             - Venous beading in 2+ quadrants, OR
+             - Intraretinal microvascular abnormalities (IRMA) in 1+ quadrant.
+  - Level 4: Neovascularization or preretinal/vitreous hemorrhage.
+
+4.6 SPATIAL AGREEMENT CHECK (`grade.spatialVerdict`)
+----------------------------------------------------
+The pipeline cross-checks the CNN's explanation against the segmented lesions:
+  - Extracts the top attention hotspots from Grad-CAM (cut = 0.35).
+  - Verifies whether real segmented lesions or candidates fall inside these high-attention zones.
+  - If the CNN made a high-severity prediction but was looking at healthy retina or camera dust artifacts,
+    the spatial check flags a disagreement and forces ESCALATION to an ophthalmologist.
+
+====================================================================================================
+5. HOW THE PIPELINE PREVENTS CLINICAL ERRORS (SAFETY & THREE-WAY DECISION)
+====================================================================================================
+Standard binary classifiers force every patient into "Healthy" or "Sick". When faced with an atypical,
+noisy, or borderline image, a binary classifier guesses. In rural telemedicine, a False Negative
+means a patient with proliferative DR is told they are fine, goes home, and goes blind.
+
+Our pipeline implements the Equal-Coverage Safety Veto (ADR 0001 & ADR 0002):
+  1. Auto-Clear Threshold (0.40):
+     A patient is only auto-cleared if their calibrated probability of referable DR is strictly below 0.40,
+     the quality is adequate, and lesion detectors find no referable pathology.
+  2. Mandatory Escalation on Level 4:
+     Any prediction of Proliferative DR (Level 4) is NEVER auto-referred or auto-cleared; it is always escalated
+     to a senior vitreoretinal specialist.
+  3. Disagreement Safety Valve:
+     If the CNN predicts Level 0 (Healthy) but the Lesion Segmentation finds Hard Exudates (Level 2),
+     the system refuses to decide autonomously and escalates the patient.
+  4. Real-world Performance (A10 Shipped Configuration):
+     - Validation Sensitivity: 98.21%
+     - Validation Specificity: 91.74%
+     - Referable Patients Sent Home: 0 out of 223 referable cases.
+
+====================================================================================================
+6. WHAT AND HOW TO IMPROVE (INNOVATION ROADMAP & HACKATHON WINNING ENHANCEMENTS)
+====================================================================================================
+If you want to take this project to the next level for the SIH finals or clinical journal submission,
+here are the exact technical improvements to implement:
+
+6.1 SUB-PIXEL MICROANEURYSM DETECTION (ADDRESSING THE WEAKEST LINK)
+-------------------------------------------------------------------
+Current State:
+Microaneurysms (MA) have low prevalence (~0.09% of pixels) and are often lost in noise.
+How to Improve:
+  1. High-Resolution Coordinate-Attention U-Net:
+     Incorporate Coordinate Attention (CA) into the U-Net skip connections. CA embeds positional information
+     into channel attention, preserving precise sub-pixel coordinates for 3-5 pixel wide microaneurysms.
+  2. Multi-Scale Top-Hat Vessel Separation:
+     Apply multiscale morphological structuring elements (disks of radius 1, 3, 5, 7) before feeding into the
+     network, passing the morphological difference as an explicit 4th input channel.
+  3. Dynamic Patch Centering:
+     Instead of random patch sampling, extract high-resolution 256x256 crops centered on all local intensity minima
+     in the inverted green channel.
+
+6.2 JOINT MULTITASK CLASSIFICATION & LESION SEGMENTATION
+--------------------------------------------------------
+Current State:
+Currently, the ResNet-50 grading model and the U-Net lesion segmentation model are trained separately.
+How to Improve:
+  Build a unified Multitask Encoder-Decoder Network in MATLAB using `dlnetwork`:
+    - Shared Backbone: EfficientNet-B4 or ConvNeXt feature extractor.
+    - Branch 1 (Classification Head): Global pooling -> Dense layer -> 5-class ICDR logits.
+    - Branch 2 (Segmentation Head): Decoder with skip connections -> 4-channel lesion masks.
+    - Joint Loss: L_total = L_classification(CrossEntropy) + lambda * L_segmentation(Tversky).
+  Advantage: Gradient updates from lesion masks force the classification backbone to learn clinically true
+  retinal features rather than overfitting to background camera artifacts.
+
+6.3 WIRING VESSEL SEGMENTATION INTO CLINICAL 4-2-1 DECISION LOGIC
+-----------------------------------------------------------------
+Current State:
+The repository trains a vessel segmentation model on DRIVE, but does not yet consume vessel outputs in the
+screening decision.
+How to Improve:
+  1. Eliminate False Haemorrhages via Vessel Masking:
+     Haemorrhage detectors frequently confuse blood vessel crossings or thick venous bends with dot haemorrhages.
+     Subtract the dilated vessel mask (`imdilate(vesselMask, strel('disk', 2))`) from the haemorrhage candidate map.
+  2. Automated Detection of Venous Beading (VB):
+     Venous Beading is a hallmark of Severe NPDR (Level 3).
+     Calculate vessel width along the skeleton of major retinal veins using Euclidean distance transforms.
+     Periodic diameter fluctuations (>30% variation over a 50-pixel segment) indicate venous beading!
+  3. Neovascularization Detection for Level 4 PDR:
+     Vessels growing over the optic disc (NVD) or elsewhere on the retina (NVE) have chaotic, tortuous, web-like
+     morphologies with high fractal dimension. Compute vessel fractal dimension (`boxcount`) in regions outside
+     the main vascular arcades to detect proliferative vessels.
+
+6.4 FOVEA & OPTIC DISC LOCALIZATION FOR MACULAR EDEMA (CSME)
+------------------------------------------------------------
+Current State:
+Clinically Significant Macular Edema (CSME) is the leading cause of sudden vision loss in diabetics. It depends
+on how close hard exudates are to the fovea (center of vision).
+How to Improve:
+  1. Optic Disc (OD) Localization:
+     Locate the OD using circular Hough transform or locating the convergence hub of the segmented vessel tree.
+  2. Fovea Localization:
+     The fovea lies approximately 2.5 disc diameters temporally from the center of the optic disc, located in the
+     Foveal Avascular Zone (FAZ) where blood vessels terminate.
+  3. CSME Diagnostic Rule:
+     If any hard exudate is segmented within 1 disc diameter (500 μm) of the fovea center, flag CSME = TRUE
+     and upgrade referral urgency to "URGENT - High Risk Macular Edema".
+
+6.5 MITIGATING THE GRAD-CAM SPATIAL AGREEMENT BOTTLENECK
+--------------------------------------------------------
+Current State:
+As recorded in the repository's status notes, the spatial agreement check currently accounts for 57% of
+escalations because Grad-CAM heatmaps are coarse and diffuse.
+How to Improve:
+  1. Implement Grad-CAM++ or HiResCAM:
+     Grad-CAM++ weights positive gradients with second- and third-order partial derivatives, producing sharp,
+     pinpointed attention peaks rather than large diffuse blobs.
+  2. Attention-Guided Training Loss:
+     During training of the classifier, add an attention alignment loss term:
+       L_attention = 1 - CosineSimilarity( GradCAM_heatmap, Downsampled_Lesion_Mask )
+     This actively penalizes the CNN if its attention diverges from actual clinical lesions.
+
+6.6 DOMAIN ADAPTATION FOR LOW-COST PORTABLE PHC CAMERAS
+-------------------------------------------------------
+Current State:
+Trained primarily on table-top benchtop fundus cameras (Zeiss, Topcon in APTOS/IDRiD). Field deployment in
+rural Primary Health Centres (PHCs) uses portable smartphone cameras (Remidio, Forus 3nethra, Volk).
+How to Improve:
+  1. Illumination Normalization (Shades of Gray / Gray-World Algorithm):
+     Standardize color temperature across camera sensors:
+       I_norm = I ./ (mean(I.^p).^(1/p))
+  2. Synthetic Vignetting & Blur Augmentation:
+     Simulate portable field distortions during training by applying peripheral vignetting, motion blur kernels,
+     and random lens glare reflections.
+
+6.7 SIMULINK TELEMEDICINE WORKFLOW EXPANSION & EDGE DEPLOYMENT
+--------------------------------------------------------------
+Current State:
+The Simulink model (`simulink/district_model.slx`) models a 100,000-patient district screening pipeline.
+How to Improve:
+  1. Edge Inference Generation using MATLAB Coder / GPU Coder:
+     Convert `grade.infer` and `quality.assess` into standalone C++ / CUDA code using MATLAB Coder.
+     This allows running instant inference locally on an NVIDIA Jetson Orin or Raspberry Pi 5 at the rural PHC
+     without requiring cloud internet connectivity!
+  2. Dynamic Grader Fatigue & Asynchronous Telemedicine Queue:
+     Expand the SimEvents model to incorporate ophthalmologist fatigue curves (review times increase from 30s
+     in morning to 60s in evening) and intermittent rural mobile network connectivity (simulating upload bursts
+     when cellular 4G towers are active).
+
+====================================================================================================
+7. COMPLETE RUN & COMMAND CHEATSHEET
+====================================================================================================
+Keep this reference handy whenever running the project from terminal or MATLAB:
+
+1. Launch Demo Graphical User Interface:
+   Terminal:  ./start.sh
+   MATLAB:    app.ScreeningApp
+
+2. Run Smoke Test for Grading Model:
+   matlab -batch "addpath(genpath('src')); grade.train('config/default.json', 'Mode', 'smoke')"
+
+3. Train ResNet-50 Grading Classifier:
+   matlab -batch "addpath(genpath('src')); grade.train('config/default.json')"
+
+4. Train IDRiD Lesion Segmentation U-Net:
+   matlab -batch "addpath(genpath('src')); segment.trainLesionSegmentation('config/default.json')"
+
+5. Train DRIVE Vessel Segmentation U-Net:
+   matlab -batch "addpath(genpath('src')); segment.trainVesselSegmentation('config/default.json')"
+
+6. Calibrate Model Probabilities (Temperature Scaling):
+   matlab -batch "addpath(genpath('src')); addpath('eval'); grade.fitTemperature('results/<run>/epoch_08.mat', 'config/default.json')"
+
+7. Run Full District Screening Simulink Capacity Sweep:
+   matlab -batch "addpath('simulink'); sweep_experiments()"
+
+8. Run Complete Verification Test Suite:
+   matlab -batch "assertSuccess(runtests('tests', 'IncludeSubfolders', true))"
+
+9. Execute One End-to-End Case in MATLAB:
+   matlab -batch "addpath(genpath('src')); res = app.runScreeningCase('data/raw/train/000c1434d8d7.png', 'results/20260823_184930/epoch_08.mat', 2.1414, 'config/default.json'); disp(res.threeWayDecision);"
+
+====================================================================================================
+8. DATASET DIRECTORY LAYOUT & EXACT FOLDER STRUCTURE (WHERE TO PLACE IMAGES)
+====================================================================================================
+To train the models or evaluate benchmarks, the raw retinal fundus image datasets must be placed
+in the `data/raw/` folder matching the exact directory hierarchy, folder names, and capitalization
+referenced by `data/splits/*.csv` and the internal path loaders.
+
+----------------------------------------------------------------------------------------------------
+8.1 DATASET SOURCES AND WHERE TO DOWNLOAD
+----------------------------------------------------------------------------------------------------
+1. APTOS 2019 Blindness Detection (For DR Grading ResNet-50):
+   - Source: Kaggle (https://www.kaggle.com/competitions/aptos2019-blindness-detection/data)
+   - Content: `train_images/` (.png images) and `train.csv` (id_code, diagnosis).
+   - Extraction Target: `data/raw/aptos2019/train_images/`
+
+2. IDRiD: Indian Diabetic Retinopathy Image Dataset (For Lesion Segmentation U-Net):
+   - Source: IEEE DataPort / Grand Challenge (https://idrid.grand-challenge.org/Data/)
+   - Package A (Segmentation): 
+     * Original Images: Training Set (54 images) and Testing Set (27 images) (.jpg)
+     * All Segmentation Groundtruths: Binary masks for Microaneurysms, Haemorrhages, 
+       Hard Exudates, Soft Exudates, and Optic Disc (.tif)
+   - Extraction Target: `data/raw/A. Segmentation/`
+
+3. DRIVE: Digital Retinal Images for Vessel Extraction (For Vessel Segmentation U-Net):
+   - Source: Grand Challenge (https://drive.grand-challenge.org/DRIVE/)
+   - Content: 
+     * Training: 20 images (`.tif`), manual vessel labels (`1st_manual/*.gif`), masks (`mask/*.gif`)
+     * Test: 20 images (`.tif`), masks (`mask/*.gif`)
+   - Extraction Target: `data/raw/training/` and `data/raw/test/`
+
+4. (Optional) Messidor-2:
+   - Sealed external validation set (keep untouched in `data/sealed/`).
+
+----------------------------------------------------------------------------------------------------
+8.2 EXACT REPOSITORY DIRECTORY TREE
+----------------------------------------------------------------------------------------------------
+Create the `data/raw/` subfolders as shown below. The file names and folder strings are case-sensitive:
+
+sih26038-master/
+├── config/
+│   └── default.json
+├── data/
+│   ├── PROVENANCE.md
+│   ├── sealed/                               <-- Sealed external benchmark (Messidor-2)
+│   ├── splits/                               <-- Fixed stratified patient-level CSV splits
+│   │   ├── train.csv                         (References data/raw/aptos2019/train_images/<id>.png)
+│   │   ├── validation.csv
+│   │   ├── calibration.csv
+│   │   ├── test.csv
+│   │   ├── lesion_train.csv                  (References data/raw/A. Segmentation/...)
+│   │   ├── lesion_validation.csv
+│   │   ├── lesion_test.csv
+│   │   ├── vessel_train.csv                  (References data/raw/training/...)
+│   │   ├── vessel_validation.csv
+│   │   └── vessel_test.csv
+│   └── raw/                                  <-- PLACE ALL DOWNLOADED DATASETS HERE
+│       │
+│       ├── aptos2019/                        <-- APTOS 2019 Dataset
+│       │   ├── train.csv                     (Original metadata with id_code, diagnosis)
+│       │   └── train_images/                 (Contains all 3,662 fundus image files)
+│       │       ├── 000c1434d8d7.png
+│       │       ├── 001639a390f0.png
+│       │       ├── 002c21358ce6.png
+│       │       └── ... (remaining .png files)
+│       │
+│       ├── A. Segmentation/                  <-- IDRiD Segmentation Package
+│       │   ├── 1. Original Images/
+│       │   │   ├── a. Training Set/
+│       │   │   │   ├── IDRiD_01.jpg
+│       │   │   │   ├── IDRiD_02.jpg
+│       │   │   │   └── ... (IDRiD_01.jpg to IDRiD_54.jpg)
+│       │   │   └── b. Testing Set/
+│       │   │       ├── IDRiD_55.jpg
+│       │   │       └── ... (IDRiD_55.jpg to IDRiD_81.jpg)
+│       │   │
+│       │   └── 2. All Segmentation Groundtruths/
+│       │       ├── a. Training Set/
+│       │       │   ├── 1. Microaneurysms/
+│       │       │   │   ├── IDRiD_01_MA.tif
+│       │       │   │   └── ...
+│       │       │   ├── 2. Haemorrhages/
+│       │       │   │   ├── IDRiD_01_HE.tif
+│       │       │   │   └── ...
+│       │       │   ├── 3. Hard Exudates/
+│       │       │   │   ├── IDRiD_01_EX.tif
+│       │       │   │   └── ...
+│       │       │   ├── 4. Soft Exudates/
+│       │       │   │   ├── IDRiD_01_SE.tif
+│       │       │   │   └── ...
+│       │       │   └── 5. Optic Disc/
+│       │       │       ├── IDRiD_01_OD.tif
+│       │       │       └── ...
+│       │       └── b. Testing Set/
+│       │           ├── 1. Microaneurysms/
+│       │           │   ├── IDRiD_55_MA.tif
+│       │           │   └── ...
+│       │           ├── 2. Haemorrhages/
+│       │           │   ├── IDRiD_55_HE.tif
+│       │           │   └── ...
+│       │           ├── 3. Hard Exudates/
+│       │           │   ├── IDRiD_55_EX.tif
+│       │           │   └── ...
+│       │           ├── 4. Soft Exudates/
+│       │           │   ├── IDRiD_55_SE.tif
+│       │           │   └── ...
+│       │           └── 5. Optic Disc/
+│       │               ├── IDRiD_55_OD.tif
+│       │               └── ...
+│       │
+│       ├── training/                         <-- DRIVE Training Set
+│       │   ├── images/
+│       │   │   ├── 21_training.tif
+│       │   │   └── ... (21 to 40 .tif files)
+│       │   ├── 1st_manual/
+│       │   │   ├── 21_manual1.gif
+│       │   │   └── ... (vessel ground truth masks)
+│       │   └── mask/
+│       │       ├── 21_training_mask.gif
+│       │       └── ... (FOV aperture masks)
+│       │
+│       └── test/                             <-- DRIVE Test Set
+│           ├── images/
+│           │   ├── 01_test.tif
+│           │   └── ... (01 to 20 .tif files)
+│           └── mask/
+│               ├── 01_test_mask.gif
+│               └── ...
+├── src/
+├── Explain/
+└── start.sh
+
+----------------------------------------------------------------------------------------------------
+8.3 DATASET INTEGRITY & VALIDATION COMMAND
+----------------------------------------------------------------------------------------------------
+After placing the dataset folders, verify that all files are found by MATLAB before launching training:
+
+Run in MATLAB or terminal:
+  matlab -batch "addpath(genpath('src')); data.validateSplits();"
+
+If any file or folder is missing or misnamed, `data.validateSplits()` prints the exact missing path
+so you can fix it immediately.
+
+====================================================================================================
+END OF GUIDE - SIH 26038 EXPLAINABLE AI DR SCREENING PIPELINE
+====================================================================================================

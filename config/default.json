@@ -1,0 +1,176 @@
+{
+  "pipeline": {
+    "quality_gate": true,
+    "enhancement": true,
+    "lesion_evidence": true,
+    "agreement_check": true,
+    "deferral": true,
+    "learned_lesion_evidence": false
+  },
+  "preprocessing": {
+    "output_type": "single",
+    "channel_mean": [
+      0,
+      0,
+      0
+    ],
+    "channel_std": [
+      0.00392156862745098,
+      0.00392156862745098,
+      0.00392156862745098
+    ]
+  },
+  "grading": {
+    "backbone": "resnet50",
+    "input_size": 224,
+    "head": "softmax",
+    "num_classes": 5,
+    "batch_size": 16,
+    "seed": 42,
+    "dropout": 0.5
+  },
+  "training": {
+    "max_epochs": 15,
+    "learning_rate": 2e-05,
+    "warmup_epochs": 2,
+    "warmup_learning_rate": 0.001,
+    "gradient_threshold": 10,
+    "dispatch_in_background": false,
+    "augmentation": true,
+    "weight_decay": 0.1,
+    "early_stopping_patience": 4,
+    "save_every_epoch": true,
+    "gradient_decay_factor": 0.9,
+    "squared_gradient_decay_factor": 0.999,
+    "epsilon": 1e-08,
+    "smoke_epochs": 1,
+    "smoke_examples_per_class": 2,
+    "smoke_batch_size": 2,
+    "smoke_freeze_backbone": true
+  },
+  "augmentation": {
+    "rotation": true,
+    "flips": true,
+    "scale_jitter": [
+      0.85,
+      1.0
+    ],
+    "brightness_shift": 10,
+    "contrast_gain": [
+      0.9,
+      1.1
+    ]
+  },
+  "class_balancing": {
+    "method": "inverse_frequency",
+    "oversampling": true
+  },
+  "lesion_segmentation": {
+    "enabled": true,
+    "lesion_types": [
+      "MA",
+      "HE",
+      "EX",
+      "SE"
+    ],
+    "patch_size": 512,
+    "patches_per_image": 24,
+    "lesion_patch_fraction": 0.75,
+    "shuffle_buffer_images": 8,
+    "fov_downsample": 8,
+    "batch_size": 4,
+    "max_epochs": 30,
+    "learning_rate": 0.001,
+    "base_filters": 32,
+    "encoder_depth": 4,
+    "tversky_alpha": 0.3,
+    "tversky_beta": 0.7,
+    "focal_gamma": 2.0,
+    "early_stopping_patience": 8,
+    "aupr_thresholds": 33,
+    "tile_overlap": 64,
+    "scale_normalisation": true,
+    "reference_fov_diameter": 3279,
+    "scale_limits": [
+      0.25,
+      4
+    ],
+    "checkpoint": "results/20260830_093848_lesion_segmentation/best_lesion_model.mat",
+    "evidence_heads": [
+      "EX"
+    ],
+    "evidence_thresholds": {
+      "MA": 0.05,
+      "HE": 0.99,
+      "EX": 0.99,
+      "SE": 0.99
+    },
+    "seed": 42,
+    "smoke_epochs": 1,
+    "smoke_images": 2,
+    "smoke_patches_per_image": 2,
+    "smoke_batch_size": 2
+  },
+  "vessel_segmentation": {
+    "enabled": true,
+    "patch_size": 128,
+    "patches_per_image": 200,
+    "vessel_patch_fraction": 0.5,
+    "batch_size": 16,
+    "max_epochs": 30,
+    "learning_rate": 0.001,
+    "base_filters": 32,
+    "encoder_depth": 4,
+    "dice_weight": 0.5,
+    "early_stopping_patience": 8,
+    "roc_thresholds": 101,
+    "operating_threshold": 0.5,
+    "tile_overlap": 32,
+    "green_clahe": true,
+    "clahe_clip_limit": 0.01,
+    "clahe_tiles": 8,
+    "shuffle_buffer_images": 7,
+    "checkpoint": "results/20260831_003101_vessel_segmentation/best_vessel_model.mat",
+    "seed": 42,
+    "smoke_epochs": 1,
+    "smoke_images": 2,
+    "smoke_patches_per_image": 4,
+    "smoke_batch_size": 2
+  },
+  "data": {
+    "dataset": "APTOS"
+  },
+  "operating_point": {
+    "referable_threshold": 0.4,
+    "frozen_on": "2026-08-23",
+    "applies_to": "decision_policy.autoClearThreshold",
+    "applies_to_note": "autoClearThreshold is the only gate that can send a patient home, so it alone governs screening sensitivity. referableThreshold splits refer vs escalate and does not affect sensitivity.",
+    "temperature": 2.1414,
+    "model": "results/20260919_042430/best_model.mat",
+    "calibration": "results/20260823_204608",
+    "validation_sensitivity": 0.9821,
+    "validation_specificity": 0.9174
+  },
+  "deferral_baseline": {
+    "confidence_cut": 0.332877,
+    "selected_on": "calibration",
+    "selected_n": 365,
+    "miss_budget": 0,
+    "frozen_on": "2026-09-02",
+    "selection_results": "results/20260902_013848_full_metrics_calibration",
+    "note": "Configuration A14 of \u00a711.6: defer on abs(calibrated P(referable) - autoClearThreshold) alone, with none of the pipeline's channels. The cut is the largest coverage the calibration split allows at a zero-miss budget, selected there and never on a reporting split. Frozen before the sealed set is opened so the external comparison uses a pre-committed number rather than one chosen after seeing the answer."
+  },
+  "decision_policy": {
+    "referableThreshold": 0.7,
+    "autoClearThreshold": 0.4,
+    "uncertaintyThreshold": 0.5,
+    "requireEvidenceForAutoClear": true,
+    "alwaysEscalateLevel4": true,
+    "escalateOnUnknownEvidence": true,
+    "escalateOnExplanationDisagreement": true,
+    "spatialAttentionCut": 0.35,
+    "spatialAgreementFraction": 0.25,
+    "escalateOnCapabilityGap": false,
+    "levelComparison": "endpoint"
+  }
+}
