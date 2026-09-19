@@ -13,6 +13,94 @@ A Simulink/SimEvents model (`simulink/`) simulates district-level screening capa
 
 `docs/SIH26038_design.html` is the single source of truth for this project: every design decision in it carries the reason it was made, including corrections recorded after the fact. Read it before changing anything a rule in this README touches.
 
+## Diagram
+%%{init: {'themeVariables': {'fontSize': '18px'}}}%%
+flowchart TB
+  subgraph group_input_quality["Input And Quality"]
+    direction TB
+    node_case_runner["Case Runner<br>[runScreeningCase.m]"]
+    node_preprocessing["Image Preprocessing<br>[preprocess.m]"]
+    node_quality_assessment["Quality Assessment<br>[assess.m]"]
+  end
+
+  subgraph group_inference_evidence["Inference And Evidence"]
+    direction TB
+    node_cnn_inference["CNN Inference<br>[infer.m]"]
+    node_temperature_scaling["Temperature Scaling<br>[applyTemperature.m]"]
+    node_gradcam["Grad-CAM Evidence<br>[gradcam.m]"]
+    node_learned_lesions["Learned Lesion Segmentation<br>[segmentLesions.m]"]
+    node_classical_detector["Classical Lesion Detector"]
+    node_lesion_evidence["Lesion Evidence"]
+  end
+
+  subgraph group_safety_decision["Safety And Decision"]
+    direction TB
+    node_spatial_agreement["Spatial Agreement Check<br>[spatialAgreement.m]"]
+    node_icdr_rule["ICDR Evidence Rule<br>[icdrRule.m]"]
+    node_decision_policy["Decision Policy<br>[decisionPolicy.m]"]
+  end
+
+  subgraph group_presentation["Presentation"]
+    direction TB
+    node_screening_app["Screening App<br>[ScreeningApp.m]"]
+    node_report_generator["Screening Report<br>[generate.m]"]
+  end
+
+  %% Keep the four sections in a two-column grid.
+  group_input_quality ~~~ group_inference_evidence
+  group_input_quality ~~~ group_safety_decision
+  group_inference_evidence ~~~ group_presentation
+  group_safety_decision ~~~ group_presentation
+
+  node_screening_clinician(("Screening Clinician")) -- submits image --> node_screening_app
+  node_screening_app -- runs case --> node_case_runner
+  node_case_runner -- preprocesses image --> node_preprocessing
+  node_case_runner -- checks quality --> node_quality_assessment
+  node_case_runner -- runs classifier --> node_cnn_inference
+  node_cnn_inference -- scales probabilities --> node_temperature_scaling
+  node_case_runner -- builds explanation --> node_gradcam
+  node_case_runner -- segments lesions --> node_learned_lesions
+  node_case_runner -- detects candidates --> node_classical_detector
+  node_learned_lesions -- provides evidence --> node_lesion_evidence
+  node_classical_detector -- provides evidence --> node_lesion_evidence
+  node_gradcam -- supplies heatmap --> node_spatial_agreement
+  node_lesion_evidence -- supplies findings --> node_spatial_agreement
+  node_case_runner -- checks agreement --> node_spatial_agreement
+  node_lesion_evidence -- supplies ICDR evidence --> node_icdr_rule
+  node_case_runner -- evaluates ICDR --> node_icdr_rule
+  node_quality_assessment -- reports quality --> node_decision_policy
+  node_temperature_scaling -- reports probability --> node_decision_policy
+  node_spatial_agreement -- reports disagreement --> node_decision_policy
+  node_icdr_rule -- reports evidence --> node_decision_policy
+  node_case_runner -- applies policy --> node_decision_policy
+  node_case_runner -- generates report --> node_report_generator
+  node_report_generator -- returns result --> node_screening_app
+
+  classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+  classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+  classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+  classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+
+  class node_case_runner,node_preprocessing,node_quality_assessment,node_screening_clinician toneBlue
+  class node_cnn_inference,node_temperature_scaling,node_gradcam,node_learned_lesions,node_classical_detector,node_lesion_evidence toneAmber
+  class node_spatial_agreement,node_icdr_rule,node_decision_policy toneMint
+  class node_screening_app,node_report_generator toneRose
+
+  click node_case_runner "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+app/runScreeningCase.m"
+  click node_preprocessing "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+common/preprocess.m"
+  click node_quality_assessment "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+quality/assess.m"
+  click node_cnn_inference "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+grade/infer.m"
+  click node_temperature_scaling "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+grade/applyTemperature.m"
+  click node_gradcam "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+explain/gradcam.m"
+  click node_learned_lesions "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+segment/segmentLesions.m"
+  click node_classical_detector "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+segment/detectMicroaneurysmCandidates.m"
+  click node_lesion_evidence "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+explain/buildLesionEvidence.m"
+  click node_spatial_agreement "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+grade/spatialAgreement.m"
+  click node_icdr_rule "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+grade/icdrRule.m"
+  click node_decision_policy "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+grade/decisionPolicy.m"
+  click node_screening_app "https://github.com/pradeeeeeeeep/retina-ai/blob/main/app/ScreeningApp.m"
+  click node_report_generator "https://github.com/pradeeeeeeeep/retina-ai/blob/main/src/+report/generate.m"
+
 ## Status
 
 The operating point is frozen (2026-08-23): a calibrated referable-probability threshold of 0.40, giving validation sensitivity 0.9821 / specificity 0.9174 and internal test sensitivity 0.9600 / specificity 0.9167 (both with 95% Wilson intervals reported alongside, per `docs/SIH26038_design.html` §11).
