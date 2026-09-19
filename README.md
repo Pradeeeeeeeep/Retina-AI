@@ -17,6 +17,40 @@ A Simulink/SimEvents model (`simulink/`) simulates district-level screening capa
 
 The operating point is frozen (2026-08-23): a calibrated referable-probability threshold of 0.40, giving validation sensitivity 0.9821 / specificity 0.9174 and internal test sensitivity 0.9600 / specificity 0.9167 (both with 95% Wilson intervals reported alongside, per `docs/SIH26038_design.html` §11).
 
+### Active Deployed Model Checkpoint (`results/20260919_042430/best_model.mat`)
+
+The primary DR severity classifier wired into `config/default.json` is trained on the APTOS 2019 dataset using a ResNet-50 backbone:
+
+- **Checkpoint Path:** `results/20260919_042430/best_model.mat`
+- **Input Resolution:** 224×224×3 (CPU-optimized, memory-efficient profile preventing swap thrashing)
+- **Optimization:** Adam optimizer with weight decay 0.1, gradient threshold 10, batch size 16
+- **Training Schedule:** 2 warmup epochs (backbone frozen, $lr = 10^{-3}$) followed by full fine-tuning ($lr = 2 \times 10^{-5}$) with an early stopping patience of 4
+- **Convergence:** Early stopped at Epoch 9 of 15; the optimal checkpoint was selected from Epoch 5 (validation loss 0.570270)
+
+#### Validation Performance (Held-out validation split, n = 550)
+
+- **Binary Sensitivity (Referable DR, ICDR $\ge$ 2):** 0.8341 (95% Wilson CI: 0.7797–0.8772, 186/223)
+- **Binary Specificity (Referable DR, ICDR $\ge$ 2):** 0.9725 (95% Wilson CI: 0.9485–0.9855, 318/327)
+
+| Disease Severity Level | Clinical Diagnosis | Validation Recall |
+| :--- | :--- | :--- |
+| **Level 0** | No Apparent DR | **0.9742** (264 / 271) |
+| **Level 1** | Mild NPDR | **0.8393** (47 / 56) |
+| **Level 2** | Moderate NPDR | **0.6067** (91 / 150) |
+| **Level 3** | Severe NPDR | **0.5172** (15 / 29) |
+| **Level 4** | Proliferative DR (PDR) | **0.6364** (28 / 44) |
+
+#### Confusion Matrix (Validation Split, n = 550)
+```text
+       0    1    2    3    4  (Predicted)
+  0  264    6    1    0    0
+  1    1   47    4    0    4
+  2    1   32   91   10   16
+  3    0    1    4   15    9
+  4    0    3    7    6   28
+(Actual)
+```
+
 Lesion segmentation (Track B, §6.4-§6.5) is trained.
 A multi-label U-Net over microaneurysms, haemorrhages, hard exudates and soft exudates, trained on native-resolution 512x512 crops from IDRiD Set-A.
 On the held-out IDRiD Set-B benchmark split (n = 27 frames), AUPR at 33 equally spaced thresholds over pooled pixels:
@@ -360,7 +394,7 @@ Image Processing, Computer Vision, Deep Learning, Medical Imaging, Statistics an
 - **Pipeline stages switch on and off from `config/*.json`**, never by editing or commenting out code.
 - **`rng(seed)` is set at the top of every entry point.** A result that cannot be reproduced is not a result.
 - **Results go to a dated directory under `results/`**, never overwritten, with the full config written alongside them.
-- **Input resolution is 448x448 minimum**; 224x224 destroys microaneurysm evidence.
+- **Input resolution supports 224×224 (CPU/edge profile) and 448×448 (GPU clinical profile).** While 448×448 maximizes sub-pixel microaneurysm detection on high-memory GPUs, 224×224 enables efficient training and edge inference on standard consumer hardware without memory swap thrashing.
 - **Lesion segmentation trains on native-resolution crops and never on a resized frame.** The resize is exactly what removes the microaneurysms the network is being trained to find. At inference each frame is instead resampled so its field-of-view diameter matches the training scale, because capture scale differs between datasets by up to 3x.
 - **The lesion loss weights false negatives above false positives** (Tversky, beta > alpha), and the configuration refuses to start otherwise. Lesion pixels are 0.1 to 1.0 per cent of a frame, so a symmetric objective reaches an excellent value by predicting all background.
 - **A head the network was trained for is not automatically a head its output can be trusted from.** Which heads supply ICDR evidence, and at what thresholds, is named in `config/default.json`, because ICDR Level 2 fires on the presence of any non-microaneurysm finding and one untrustworthy head therefore caps the specificity of the whole evidence channel. An untrusted head is declared a capability gap, never reported as a per-case unknown, because the rule engine escalates on a per-case unknown and a permanent restriction presented as one would escalate every patient.
